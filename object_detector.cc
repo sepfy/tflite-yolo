@@ -15,10 +15,10 @@ ObjectDetector::ObjectDetector(int width, int height) {
   num_of_category_ = 80;
 
   anchors_ = std::vector<float>({12.64, 19.39, 37.88, 51.48, 55.71, 138.31, 126.91, 78.23, 131.57, 214.55, 279.92, 258.87});
-  num_of_anchor_ = anchors_.size()/2;
+  num_of_anchor_ = anchors_.size()/4;
 
   strides_ = std::vector<int>({16, 32});
-
+  iou_threshold_ = 0.5;
 }
 
 ObjectDetector::~ObjectDetector() {
@@ -42,54 +42,50 @@ int ObjectDetector::LoadModel(const char *model_path) {
     return -1;
   }
 
-#if 0
-  std::vector<int> strides;
-  strides.push_back(8);
-  strides.push_back(16);
-  strides.push_back(16);
-  strides.push_back(16);
-
-  anchor_boxes_ = GenerateAnchors(width_, height_, strides);
-#endif
-
   if(interpreter_->AllocateTensors() != kTfLiteOk) {
     printf("Allocate Tensors failed\n");
     return -1;
   }
 
-  tflite::PrintInterpreterState(interpreter_.get());
+  //tflite::PrintInterpreterState(interpreter_.get());
   return 0;
 }
 
 
-int ObjectDetector::Inference(float *inputs) {
+std::vector<ObjectBox> ObjectDetector::Inference(float *inputs) {
 
   TfLiteTensor *input_tensor = interpreter_->tensor(interpreter_->inputs()[0]);
   memcpy(interpreter_->typed_input_tensor<float>(0), inputs, width_*height_*3*sizeof(float));
-printf("Involke!\n");
 
   long long start_time, end_time;
 
   start_time = getms();
   if(!interpreter_->Invoke() == kTfLiteOk)
-    return -1;
+    return std::vector<ObjectBox>({});
+
+  TfLiteTensor *out_tensor = interpreter_->tensor(interpreter_->outputs()[0]);
+  TfLiteTensor *score_tensor = interpreter_->tensor(interpreter_->outputs()[1]);
+
+  std::vector<ObjectBox> candidate_boxes;
 
   std::vector<ObjectBox> candidate_boxes1;
-  candidate_boxes1 = Postprocess(interpreter_->typed_output_tensor<float>(0), strides_[0]);
+  candidate_boxes1 = Postprocess(interpreter_->typed_output_tensor<float>(0), strides_[0], std::vector<float>(anchors_.begin(), anchors_.begin() + 6));
+
   std::vector<ObjectBox> candidate_boxes2;
-  candidate_boxes2 = Postprocess(interpreter_->typed_output_tensor<float>(1), strides_[1]);
+  candidate_boxes2 = Postprocess(interpreter_->typed_output_tensor<float>(1), strides_[1], std::vector<float>(anchors_.begin() + 6, anchors_.end()));
 
+  candidate_boxes.reserve(candidate_boxes1.size() + candidate_boxes2.size());
+  candidate_boxes.insert(candidate_boxes.end(), candidate_boxes1.begin(), candidate_boxes1.end());
+  candidate_boxes.insert(candidate_boxes.end(), candidate_boxes2.begin(), candidate_boxes2.end());
+  
+  std::vector<ObjectBox> result = NonMaxSupression(candidate_boxes);
   end_time = getms();
-  printf("Involke End! %lld\n", end_time - start_time);
-
-  return 0;
+  return result;
 }
 
-std::vector<ObjectBox> ObjectDetector::Postprocess(float *detections, int stride) {
+std::vector<ObjectBox> ObjectDetector::Postprocess(float *detections, int stride, std::vector<float> anchors) {
 
   std::vector<ObjectBox> object_boxes;
-
-  int cx, cy, w, h;
 
   float score;
   float confidence;
@@ -100,12 +96,12 @@ std::vector<ObjectBox> ObjectDetector::Postprocess(float *detections, int stride
   int feature_map_height = height_/stride;
   int feature_map_start_index = 0;
 
-  for(int w = 0; w < feature_map_width; w++) {
 
+  for(int h = 0; h < feature_map_height; h++) {
 
-    for(int h = 0; h < feature_map_height; h++) {
+    for(int w = 0; w < feature_map_width; w++) {
 
-
+      max_confidence = 0;
       for(int c = 0; c < num_of_category_; c++) {
 
         confidence = detections[feature_map_start_index + 4*num_of_anchor_ + num_of_anchor_ + c];
@@ -117,36 +113,40 @@ std::vector<ObjectBox> ObjectDetector::Postprocess(float *detections, int stride
 
       }
 
-  
-      for(size_t i = 0; i < num_of_anchor_; i++) {
+      for(int i = 0; i < num_of_anchor_; i++) {
 
         score = max_confidence*detections[feature_map_start_index + 4*num_of_anchor_ + i];
-        cx = (detections[feature_map_start_index + 4*i + 0]*2.0 - 0.5 + w)*stride;
-        cy = (detections[feature_map_start_index + 4*i + 1]*2.0 - 0.5 + h)*stride;
-        w = pow(detections[feature_map_start_index + 4*i + 1]*2.0, 2)*anchors_[i*2 + 0];
-        h = pow(detections[feature_map_start_index + 4*i + 1]*2.0, 2)*anchors_[i*2 + 1];
+
+        if(score < 0.3) continue;
                         
-        ObjectBox object_box(cx, cy, w, h, category, score);
+        ObjectBox object_box;
+        object_box.cx = (detections[feature_map_start_index + 4*i + 0]*2.0 - 0.5 + w)*(float)stride;
+        object_box.cy = (detections[feature_map_start_index + 4*i + 1]*2.0 - 0.5 + h)*(float)stride;
+        object_box.w = pow(detections[feature_map_start_index + 4*i + 2]*2.0, 2.0)*anchors[i*2 + 0];
+        object_box.h = pow(detections[feature_map_start_index + 4*i + 3]*2.0, 2.0)*anchors[i*2 + 1];
+        object_box.category = category;
+        object_box.score = score;
+
         object_boxes.push_back(object_box);
       }
 
       feature_map_start_index += 95;
-
     }
 
   }
 
+printf("%d\n", feature_map_start_index);
   return object_boxes;
 }
 
 
 int ObjectDetector::BoxConfidenceArgmax(std::vector<ObjectBox> boxes) {
 
-  float max_confidence = 0;
+  float max_score = 0;
   int max_index = 0;
   for(size_t i = 0; i < boxes.size(); i++) {
-    if(boxes[i].confidence > max_confidence) {
-      max_confidence = boxes[i].confidence;
+    if(boxes[i].score > max_score) {
+      max_score = boxes[i].score;
       max_index = i;
     }
   }
@@ -155,10 +155,12 @@ int ObjectDetector::BoxConfidenceArgmax(std::vector<ObjectBox> boxes) {
 
 std::vector<ObjectBox> ObjectDetector::NonMaxSupression(std::vector<ObjectBox> candidate_boxes) {
 
-  std::vector<Box> detection_boxes;
+  std::vector<ObjectBox> detection_boxes;
+
   while(candidate_boxes.size() > 0) {
+
     size_t max_index = BoxConfidenceArgmax(candidate_boxes);
-    Box selected_box = candidate_boxes[max_index];
+    ObjectBox selected_box = candidate_boxes[max_index];
     candidate_boxes.erase(candidate_boxes.begin() + max_index);
     detection_boxes.push_back(selected_box);
 

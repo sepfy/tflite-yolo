@@ -8,25 +8,20 @@
 
 #include <vector>
 
-class ObjectBox {
-
- public:
-
-  ObjectBox(int cx, int cy, int w, int h, int category, float score) : cx_(cx), cy_(cy), w_(w), h_(h), category_(category), score_(score) {}
+typedef struct ObjectBox {
 
   //float GetWidth() { return rx_ - lx_; }
   //float GetHeight() { return ry_ - ly_; }
   //float GetArea() { return GetWidth()*GetHeight(); }
 
- private:
-  int w_;
-  int h_;
-  int cx_;
-  int cy_;
-  int category_;
-  float score_;
+  int w;
+  int h;
+  int cx;
+  int cy;
+  int category;
+  float score;
 
-};
+} ObjectBox;
 
 
 class ObjectDetector {
@@ -35,8 +30,8 @@ class ObjectDetector {
   ObjectDetector(int width, int height);
   ~ObjectDetector();
   int LoadModel(const char *model_path);
-  int Inference(float *inputs);
-  std::vector<ObjectBox> Postprocess(float *detections, int stride);
+  std::vector<ObjectBox> Inference(float *inputs);
+  std::vector<ObjectBox> Postprocess(float *detections, int stride, std::vector<float> anchors);
 
 
   int BoxConfidenceArgmax(std::vector<ObjectBox> boxes);
@@ -52,7 +47,7 @@ class ObjectDetector {
   int num_of_category_;
   std::vector<float> anchors_;
   int num_of_anchor_;
-
+  float iou_threshold_;
   std::vector<int> strides_;
 };
 
