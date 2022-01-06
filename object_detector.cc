@@ -7,10 +7,10 @@ long long getms() {
   return tv.tv_sec*1.0e+3 + tv.tv_usec/1000;
 }
 
-ObjectDetector::ObjectDetector(int width, int height) {
+ObjectDetector::ObjectDetector() {
 
-  width_ = width;
-  height_ = height;
+  width_ = 352;
+  height_ = 352;
 
   num_of_category_ = 80;
 
@@ -19,6 +19,7 @@ ObjectDetector::ObjectDetector(int width, int height) {
 
   strides_ = std::vector<int>({16, 32});
   iou_threshold_ = 0.5;
+  threshold_ = 0.3;
 }
 
 ObjectDetector::~ObjectDetector() {
@@ -52,10 +53,19 @@ int ObjectDetector::LoadModel(const char *model_path) {
 }
 
 
-std::vector<ObjectBox> ObjectDetector::Inference(float *inputs) {
+void ObjectDetector::SetNumThreads(uint32_t num) {
+
+  if(interpreter_ != nullptr)
+    interpreter_->SetNumThreads(num);
+}
+
+float* ObjectDetector::GetInputTensor() {
 
   TfLiteTensor *input_tensor = interpreter_->tensor(interpreter_->inputs()[0]);
-  memcpy(interpreter_->typed_input_tensor<float>(0), inputs, width_*height_*3*sizeof(float));
+  return interpreter_->typed_input_tensor<float>(0);
+}
+
+std::vector<ObjectBox> ObjectDetector::Inference() {
 
   long long start_time, end_time;
 
@@ -80,7 +90,15 @@ std::vector<ObjectBox> ObjectDetector::Inference(float *inputs) {
   
   std::vector<ObjectBox> result = NonMaxSupression(candidate_boxes);
   end_time = getms();
+
   return result;
+}
+
+std::vector<ObjectBox> ObjectDetector::Inference(float *inputs) {
+
+  TfLiteTensor *input_tensor = interpreter_->tensor(interpreter_->inputs()[0]);
+  memcpy(interpreter_->typed_input_tensor<float>(0), inputs, width_*height_*3*sizeof(float));
+  return Inference();
 }
 
 std::vector<ObjectBox> ObjectDetector::Postprocess(float *detections, int stride, std::vector<float> anchors) {
@@ -117,7 +135,7 @@ std::vector<ObjectBox> ObjectDetector::Postprocess(float *detections, int stride
 
         score = max_confidence*detections[feature_map_start_index + 4*num_of_anchor_ + i];
 
-        if(score < 0.3) continue;
+        if(score < threshold_) continue;
                         
         ObjectBox object_box;
         object_box.cx = (detections[feature_map_start_index + 4*i + 0]*2.0 - 0.5 + w)*(float)stride;
@@ -135,7 +153,6 @@ std::vector<ObjectBox> ObjectDetector::Postprocess(float *detections, int stride
 
   }
 
-printf("%d\n", feature_map_start_index);
   return object_boxes;
 }
 

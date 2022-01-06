@@ -27,17 +27,25 @@ typedef struct ObjectBox {
 class ObjectDetector {
 
  public:
-  ObjectDetector(int width, int height);
+
+  ObjectDetector();
   ~ObjectDetector();
   int LoadModel(const char *model_path);
   std::vector<ObjectBox> Inference(float *inputs);
+  std::vector<ObjectBox> Inference();
+  float *GetInputTensor();
   std::vector<ObjectBox> Postprocess(float *detections, int stride, std::vector<float> anchors);
 
 
   int BoxConfidenceArgmax(std::vector<ObjectBox> boxes);
   std::vector<ObjectBox> NonMaxSupression(std::vector<ObjectBox> candidate_boxes);
 
+  void SetNumThreads(uint32_t num);
+
+  inline void threshold(float threshold) { threshold_ = threshold; }
+
  private:
+
   int width_;
   int height_;
   int category_;
@@ -49,6 +57,8 @@ class ObjectDetector {
   int num_of_anchor_;
   float iou_threshold_;
   std::vector<int> strides_;
+
+  float threshold_;
 };
 
 #endif // OBJECT_DETECTOR_H_

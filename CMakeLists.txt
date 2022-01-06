@@ -35,15 +35,23 @@ add_subdirectory(
   EXCLUDE_FROM_ALL
 )
 
-find_package( OpenCV REQUIRED )
-include_directories( ${OpenCV_INCLUDE_DIRS} )
+find_package(PkgConfig)
+pkg_check_modules(GST REQUIRED gstreamer-1.0>=1.4 gstreamer-base-1.0>=1.4)
+
+find_package(OpenCV REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS} ${GST_INCLUDE_DIRS})
 
 set(CMAKE_CXX_STANDARD 11)
-add_executable(minimal
-  minimal.cc
+
+#add_executable(minimal
+add_library(gstobjectdetect SHARED
   object_detector.cc
+  gstobjectdetect.cc 
 )
-target_link_libraries(minimal
+
+#target_link_libraries(minimal
+target_link_libraries(gstobjectdetect
   tensorflow-lite
   ${OpenCV_LIBS}
+  ${GST_LIBRARIES}
 )
